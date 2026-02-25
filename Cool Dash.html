@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geometry Dash — Relaxed Performance Edition</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;font-family:'Orbitron',sans-serif;user-select:none;-webkit-tap-highlight-color:transparent;}
+#gc{display:block;position:fixed;top:0;left:0;z-index:1;cursor:pointer;}
+#ui{position:fixed;top:0;left:0;right:0;bottom:0;z-index:10;pointer-events:none;}
+
+/* HUD */
+#hud{
+  position:absolute;top:0;left:0;right:0;
+  padding:14px 22px;
+  display:flex;justify-content:space-between;align-items:center;
+  background:linear-gradient(to bottom,rgba(0,0,0,.8) 0%,transparent 100%);
+}
+.hl{display:flex;align-items:center;gap:12px;}
+.hv{color:#fff;font-size:11px;letter-spacing:3px;text-shadow:0 0 8px currentColor;}
+#pct{
+  color:#fff;font-size:26px;font-weight:900;letter-spacing:2px;
+  text-shadow:0 0 10px #ffffff;
+}
+#att{color:#00ffaa;font-size:12px;letter-spacing:3px; font-weight: bold;}
+#modeTag{
+  font-size:10px;letter-spacing:3px;padding:4px 12px;
+  border:2px solid;border-radius:4px;font-weight:900;
+}
+#modeTag.cube{color:#00ffaa;border-color:#00ffaa;background:rgba(0,255,170,.15);}
+#modeTag.ship{color:#ff5500;border-color:#ff5500;background:rgba(255,85,0,.15);}
+#modeTag.ball{color:#cc00ff;border-color:#cc00ff;background:rgba(204,0,255,.15);}
+
+/* PROGRESS BAR */
+#pt{position:absolute;bottom:0;left:0;right:0;height:6px;background:rgba(255,255,255,.1);}
+#pb{height:6px;width:0%;transition:width .05s linear;}
+#pb.cube{background:#00ffaa;box-shadow:0 0 15px #00ffaa;}
+#pb.ship{background:#ff5500;box-shadow:0 0 15px #ff5500;}
+#pb.ball{background:#cc00ff;box-shadow:0 0 15px #cc00ff;}
+
+/* SCREENS */
+.scr{
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;
+  transition:opacity .2s ease;
+}
+.scr.on{opacity:1;pointer-events:all;}
+#ms{background:rgba(0,0,5,.9);backdrop-filter:blur(8px);}
+#ds{background:rgba(255,0,0,.25);}
+
+.gtitle{
+  font-size:clamp(30px,7vw,80px);
+  font-weight:900;letter-spacing:10px;
+  background:linear-gradient(180deg, #fff 0%, #aaa 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  margin-bottom:10px;
+  filter:drop-shadow(0 0 10px rgba(255,255,255,.5));
+}
+.gsub{color:#00ffaa;font-size:14px;letter-spacing:8px;margin-bottom:50px; font-weight: bold;}
+
+.btn{
+  background:rgba(0,255,170,.1);
+  border:2px solid #00ffaa;
+  color:#00ffaa;
+  font-family:'Orbitron',sans-serif;font-size:16px;font-weight:bold;letter-spacing:5px;
+  padding:15px 50px;cursor:pointer;pointer-events:all;
+  text-transform:uppercase;transition:all .1s;margin:10px;
+}
+.btn:hover{background:#00ffaa;color:#000;box-shadow:0 0 30px #00ffaa;}
+.btn:active{transform:scale(.95);}
+.btnRow{display:flex;gap:15px;flex-wrap:wrap;justify-content:center;}
+
+.dtitle{font-size:60px;font-weight:900;color:#ff0000;text-shadow:0 0 30px #ff0000;}
+</style>
+</head>
+<body>
+<audio id="bgMusic" src="song.mp3" preload="auto"></audio>
+
+<canvas id="gc"></canvas>
+<div id="ui">
+  <div id="hud">
+    <div class="hl">
+      <div class="hv" id="att">ATTEMPT 1</div>
+      <div class="hv" id="modeTag">CUBE</div>
+    </div>
+    <div class="hl"><div class="hv" id="pct">0%</div></div>
+  </div>
+  <div id="pt"><div id="pb" class="cube"></div></div>
+
+  <div class="scr on" id="ms">
+    <div class="gtitle">GEOMETRY DASH</div>
+    <div class="gsub">RELAXED MODE</div>
+    <div class="btnRow"><button class="btn" id="playBtn">PLAY</button></div>
+    <div style="color:rgba(255,255,255,0.3); font-size:10px; margin-top:20px; letter-spacing:2px;">
+      PLACE "song.mp3" IN THIS FOLDER FOR MUSIC
+    </div>
+  </div>
+
+  <div class="scr" id="ds">
+    <div class="dtitle">CRASHED</div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+// --- CORE SETUP ---
+var C=document.getElementById('gc'), ctx=C.getContext('2d', { alpha: false }); 
+var W=0, H=0;
+function resize(){ W=C.width=window.innerWidth; H=C.height=window.innerHeight; }
+window.addEventListener('resize',resize);
+resize();
+
+// --- CACHED DOM ELEMENTS ---
+var elPct = document.getElementById('pct'), elPb = document.getElementById('pb');
+var elAtt = document.getElementById('att'), elModeTag = document.getElementById('modeTag');
+var elDs = document.getElementById('ds'), elMs = document.getElementById('ms'), bgMusic = document.getElementById('bgMusic');
+
+// --- SYNTH AUDIO ---
+var AC=null;
+function gAC(){if(!AC)try{AC=new(window.AudioContext||window.webkitAudioContext)();}catch(e){} if(AC&&AC.state==='suspended')AC.resume(); return AC;}
+function tone(f,t,d,v,s){
+  var ac=gAC();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),now=ac.currentTime;
+  o.type=t; g.gain.setValueAtTime(v,now); g.gain.exponentialRampToValueAtTime(.001,now+d);
+  if(s){o.frequency.setValueAtTime(s,now);o.frequency.exponentialRampToValueAtTime(f,now+d*.5);}
+  else o.frequency.setValueAtTime(f,now);
+  o.connect(g);g.connect(ac.destination);o.start(now);o.stop(now+d);
+}
+function sfxJump(){tone(300,'square',.15,.08,150);}
+function sfxDeath(){tone(100,'sawtooth',.5,.2,400);tone(50,'square',.4,.2);}
+
+// --- RELAXED PHYSICS CONSTANTS ---
+var T=50; 
+var PS=T-6; 
+var SPD = 4.5; // Slower, relaxed speed
+var GRAV = 0.65; // Lighter gravity gives more reaction time
+var JUMP = -11.5; // Adjusted jump arc for slower speed
+var SGRAV = 0.25, STHRUST = -0.5, SMAX = 7; // Much gentler ship controls
+var BGRAV = 0.7; // Slower ball flip
+
+// --- GAME STATE ---
+var gs='menu', attempts=0;
+var player=null, camX=0, groundY=0;
+var onGround=false, holding=false;
+var deathP=[];
+var tileArr=[], portals=[], orbs=[], spikes=[];
+var curMode='cube', curGrav=1, frameN=0, flashAlpha=0;
+var LEVEL_W=250; // Slightly shorter level
+
+// --- EASIER LEVEL GENERATION ---
+function genLevel(){
+  tileArr=[]; portals=[]; orbs=[]; spikes=[];
+  groundY=Math.floor(H/T)-3;
+
+  function add(tx,ty,type){
+      var obj = {x:tx, y:ty, type:type};
+      tileArr.push(obj);
+      if(type==='spike' || type==='cspike') spikes.push(obj);
+  }
+  
+  // Floor
+  for(var x=0;x<LEVEL_W;x++) add(x,groundY+1,'block');
+
+  // Easy Layout - Spread out obstacles, no blind jumps
+  var layout = [
+    [15,'S'], // Single spike
+    [25,'S'], [26,'S'], // Easy double spike with plenty of room
+    [35,'B',1],[36,'B',2],[37,'B',2],[38,'B',1], // Simple bump
+    [45,'O',45,groundY-2], // Clearly visible orb
+    [55,'P',55,groundY-3,4], // Nice wide platform
+    [65,'PORTAL','ship',groundY-1] // Portal
+  ];
+
+  // Wide, open Ship Section
+  var shipStart = 70;
+  for(var x=shipStart; x<shipStart+60; x++) {
+      add(x, groundY-11, 'block'); // Much higher ceiling
+      if(x%8===0 && x>shipStart+10) add(x, groundY, 'spike'); // Spikes are spread far apart
+  }
+  // Gentle obstacles instead of tight corridors
+  add(85,'B',2); add(85,'C',groundY-11); 
+  add(95,'B',3); add(95,'C',groundY-9);
+  add(105,'B',2); add(105,'C',groundY-10);
+
+  // Ball section with a clear path
+  layout.push([135,'PORTAL','ball',groundY-1]);
+  for(var bx=135; bx<180; bx++) add(bx, groundY-7, 'block'); // Add ceiling for ball
+  
+  layout.push(
+      [145,'S'], // Floor spike
+      [150,'S',-7], // Ceiling spike (-7 aligns with ball ceiling)
+      [155,'S'], // Floor spike
+      [162,'O',162,groundY-3] // Easy orb
+  );
+
+  // Parse layout array
+  for(var i=0; i<layout.length; i++){
+    var p=layout[i], tx=p[0];
+    if(p[1]==='S'){
+        if(p[2] && p[2]<0) add(tx,groundY+p[2],'cspike');
+        else add(tx,groundY-(p[2]?p[2]-1:0),'spike');
+    }
+    else if(p[1]==='B') { for(var j=0;j<p[2];j++) add(tx,groundY-j,'block'); }
+    else if(p[1]==='C') { add(tx,p[2],'block'); }
+    else if(p[1]==='P') { for(var k=0;k<p[4];k++) add(p[2]+k,p[3],'block'); } 
+    else if(p[1]==='O') orbs.push({x:p[2]*T, y:p[3]*T+T/2, r:16, hit:false});
+    else if(p[1]==='PORTAL') portals.push({x:tx*T, y:p[3]*T, to:p[2]});
+  }
+}
+
+// Optimized block lookup
+function getBlock(tx,ty){ 
+    for(var i=0; i<tileArr.length; i++){
+        if(tileArr[i].type==='block' && tileArr[i].x===tx && tileArr[i].y===ty) return true;
+    }
+    return false;
+}
+
+// --- INPUT & CONTROLS ---
+function tryAction(){
+  if(gs!=='play'||!player.alive)return;
+  if(curMode==='cube' && onGround){ player.vy=JUMP; onGround=false; sfxJump(); }
+  else if(curMode==='ball'){ curGrav*=-1; player.vy=JUMP*0.4*curGrav; sfxJump(); }
+  
+  // Very forgiving orb hitboxes
+  for(var i=0; i<orbs.length; i++){
+      var o = orbs[i];
+      if(!o.hit && Math.abs((player.x+PS/2)-o.x)<T*1.8 && Math.abs((player.y+PS/2)-o.y)<T*1.8){
+          o.hit=true; player.vy=JUMP; onGround=false; sfxJump();
+      }
+  }
+}
+document.addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault(); holding=true; tryAction();}});
+document.addEventListener('keyup',function(e){if(e.code==='Space'||e.code==='ArrowUp') holding=false;});
+C.addEventListener('mousedown',function(){holding=true; tryAction();}); 
+C.addEventListener('mouseup',function(){holding=false;});
+
+document.getElementById('playBtn').onclick = startGame;
+
+// --- GAME LOGIC ---
+function startGame(){
+  gAC(); 
+  bgMusic.currentTime = 0;
+  bgMusic.play().catch(function(e){ console.log("Audio skipped: Place song.mp3 in the folder."); });
+
+  genLevel(); attempts++;
+  curMode='cube'; curGrav=1; camX=0; onGround=false; holding=false; flashAlpha=0; deathP=[];
+  player={x:T*3, y:groundY*T-PS, vy:0, rot:0, alive:true};
+  
+  elAtt.innerText='ATTEMPT '+attempts;
+  updateUI();
+  
+  gs='play';
+  elMs.classList.remove('on');
+  elDs.classList.remove('on');
+}
+
+function updateUI(){
+  elModeTag.className='hv '+curMode; 
+  elModeTag.innerText=curMode.toUpperCase();
+  elPb.className=curMode;
+}
+
+function update(){
+  if(gs!=='play'||!player.alive)return;
+  frameN++;
+  player.x += SPD;
+  camX = player.x - W*0.3; 
+
+  // Physics
+  if(curMode==='cube'){
+    player.vy+=GRAV*curGrav;
+    if(holding && onGround){ player.vy=JUMP; onGround=false; sfxJump(); } 
+  } else if(curMode==='ship'){
+    player.vy += (holding ? STHRUST : SGRAV) * curGrav;
+    player.vy = Math.max(-SMAX, Math.min(SMAX, player.vy));
+  } else if(curMode==='ball'){
+    player.vy += BGRAV*curGrav;
+  }
+  
+  if(curMode!=='ship') player.vy = Math.max(-18, Math.min(18, player.vy));
+  player.y += player.vy;
+
+  // Collision (Bitwise Math.floor for speed)
+  onGround=false;
+  var px = player.x, py = player.y;
+  var L=(px+6)/T|0, R=(px+PS-6)/T|0; // Slightly more forgiving side hitboxes
+  
+  // Vertical
+  if(player.vy * curGrav >= 0){ 
+      var checkY = curGrav > 0 ? (py+PS)/T|0 : py/T|0;
+      if(getBlock(L,checkY) || getBlock(R,checkY)){
+          player.y = curGrav > 0 ? checkY*T - PS : (checkY+1)*T;
+          player.vy = 0;
+          onGround = true;
+      }
+  }
+  
+  // Horizontal Side
+  var T1=(player.y+6)/T|0, B1=(player.y+PS-6)/T|0;
+  if(getBlock((px+PS)/T|0, T1) || getBlock((px+PS)/T|0, B1)) die();
+
+  // Spikes - Forgiving hitboxes (Smaller than visual spike)
+  var hitBox = 14; 
+  for(var i=0; i<spikes.length; i++){
+      var t = spikes[i];
+      var sx = t.x*T+hitBox, ex = t.x*T+T-hitBox;
+      var sy = t.type==='spike' ? t.y*T+hitBox : t.y*T;
+      var ey = t.type==='spike' ? t.y*T+T : t.y*T+T-hitBox;
+      if(px+PS-hitBox > sx && px+hitBox < ex && py+PS-hitBox > sy && py+hitBox < ey) die();
+  }
+
+  if(py > H || py < -T*2) die();
+
+  // Rotations
+  if(curMode==='cube' && !onGround) player.rot += 0.08; // Slower rotation
+  else if(curMode==='cube' && onGround) player.rot = Math.round(player.rot/(Math.PI/2))*(Math.PI/2);
+  else if(curMode==='ship') player.rot = player.vy * 0.05;
+  else if(curMode==='ball') player.rot += 0.12 * curGrav;
+
+  // Portals
+  for(var pIdx=0; pIdx<portals.length; pIdx++){
+      var p = portals[pIdx];
+      if(Math.abs((px+PS/2)-p.x)<T && curMode!==p.to){ curMode=p.to; updateUI(); flashAlpha=0.3; }
+  }
+
+  // Progress UI
+  var pct = Math.min(100, ((px / (LEVEL_W*T)) * 100)|0);
+  elPct.innerText=pct+'%';
+  elPb.style.width=pct+'%';
+}
+
+function die(){
+  bgMusic.pause(); 
+  player.alive=false; gs='dead'; sfxDeath();
+  for(var i=0;i<40;i++) deathP.push({x:player.x+PS/2, y:player.y+PS/2, vx:(Math.random()-.5)*15, vy:(Math.random()-.5)*15, life:1});
+  flashAlpha=0.8;
+  elDs.classList.add('on');
+  setTimeout(startGame, 1000); 
+}
+
+// --- OPTIMIZED RENDER LOOP ---
+function render(){
+  // Dynamic Background
+  var bgG = ctx.createLinearGradient(0,0,0,H);
+  bgG.addColorStop(0,'#000515'); bgG.addColorStop(1,'#0f1730');
+  ctx.fillStyle=bgG; ctx.fillRect(0,0,W,H);
+
+  // Background Grid Matrix
+  ctx.strokeStyle='rgba(50, 100, 255, 0.1)'; ctx.lineWidth=2;
+  var offX = (-camX*0.3)%100;
+  ctx.beginPath();
+  for(var i=offX; i<W; i+=100){ ctx.moveTo(i,0); ctx.lineTo(i,H); }
+  for(var j=0; j<H; j+=100){ ctx.moveTo(0,j); ctx.lineTo(W,j); }
+  ctx.stroke();
+
+  // Draw Level
+  for(var tIdx=0; tIdx<tileArr.length; tIdx++){
+    var t = tileArr[tIdx];
+    var sx = t.x*T-camX, sy = t.y*T;
+    if(sx<-T || sx>W+T) continue;
+    
+    if(t.type==='block'){
+        ctx.fillStyle='#0f0f1a'; ctx.fillRect(sx,sy,T,T); 
+        ctx.strokeStyle='#00ffff'; ctx.lineWidth=2; ctx.strokeRect(sx,sy,T,T); 
+        ctx.fillStyle='rgba(0,255,255,0.1)'; ctx.fillRect(sx+4,sy+4,T-8,T-8); 
+    } else if(t.type==='spike' || t.type==='cspike'){
+        ctx.fillStyle='#ff0055';
+        ctx.beginPath();
+        if(t.type==='spike'){ ctx.moveTo(sx+T/2, sy+4); ctx.lineTo(sx+T-2, sy+T); ctx.lineTo(sx+2, sy+T); }
+        else { ctx.moveTo(sx+T/2, sy+T-4); ctx.lineTo(sx+T-2, sy); ctx.lineTo(sx+2, sy); }
+        ctx.fill();
+        ctx.strokeStyle='#ff99aa'; ctx.lineWidth=1; ctx.stroke(); 
+    }
+  }
+
+  // Draw Portals & Orbs
+  for(var pIdx=0; pIdx<portals.length; pIdx++){
+      var p = portals[pIdx];
+      var psx = p.x-camX, psy = p.y;
+      if(psx<-T*2 || psx>W) continue;
+      ctx.strokeStyle = p.to==='ship'?'#ff5500':'#cc00ff';
+      ctx.lineWidth=5; ctx.strokeRect(psx-10, psy, 20, T*3);
+  }
+  for(var oIdx=0; oIdx<orbs.length; oIdx++){
+      var o = orbs[oIdx];
+      if(o.hit) continue;
+      var osx = o.x-camX;
+      ctx.fillStyle='#ffff00'; ctx.beginPath(); ctx.arc(osx,o.y,o.r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.stroke();
+  }
+
+  // Draw Player
+  if(player && player.alive){
+      ctx.save();
+      ctx.translate(player.x-camX+PS/2, player.y+PS/2);
+      ctx.rotate(player.rot);
+      
+      ctx.shadowColor='#00ffaa'; ctx.shadowBlur=20;
+      
+      if(curMode==='cube'){
+          ctx.fillStyle='#00ffaa'; ctx.fillRect(-PS/2, -PS/2, PS, PS);
+          ctx.fillStyle='#000'; ctx.fillRect(-PS/2+4, -PS/2+4, PS-8, PS-8);
+      } else if(curMode==='ship'){
+          ctx.fillStyle='#ff5500'; ctx.beginPath(); ctx.moveTo(PS/2,0); ctx.lineTo(-PS/2,-PS/3); ctx.lineTo(-PS/2,PS/3); ctx.fill();
+      } else {
+          ctx.fillStyle='#cc00ff'; ctx.beginPath(); ctx.arc(0,0,PS/2,0,Math.PI*2); ctx.fill();
+      }
+      ctx.shadowBlur=0; ctx.restore();
+  }
+
+  // Draw Death Particles
+  if(deathP.length > 0){
+      ctx.fillStyle='#ff0000';
+      for(var i=deathP.length-1; i>=0; i--){
+          var dp = deathP[i];
+          dp.x+=dp.vx; dp.y+=dp.vy; dp.life-=0.03;
+          if(dp.life<=0){ deathP.splice(i,1); continue; }
+          ctx.globalAlpha=dp.life; ctx.fillRect(dp.x-camX, dp.y, 8, 8);
+      }
+      ctx.globalAlpha=1;
+  }
+
+  // Flash Effect
+  if(flashAlpha>0){
+      ctx.fillStyle='rgba(255,255,255,'+flashAlpha+')'; ctx.fillRect(0,0,W,H);
+      flashAlpha -= 0.05;
+  }
+}
+
+function loop(){
+  if(gs==='play'||gs==='dead'){ update(); render(); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
